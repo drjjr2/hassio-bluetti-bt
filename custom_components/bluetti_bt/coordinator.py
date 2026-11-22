@@ -66,6 +66,9 @@ class PollingCoordinator(DataUpdateCoordinator):
             max_retries=max_retries,
             device_address=address,
             ble_device=device,
+            ble_device_callback=lambda: bluetooth.async_ble_device_from_address(
+                hass, address, connectable=True
+            ),
             encrypted=encrypted,
         )
 

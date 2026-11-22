@@ -27,6 +27,7 @@ class DeviceReader:
         device_address: str | None = None,
     ble_device = None,
     encrypted: bool = False,
+        ble_device_callback: Callable[[], Any] | None = None,
     ) -> None:
         self.client = bleak_client
         self.bluetti_device = bluetti_device
@@ -38,6 +39,7 @@ class DeviceReader:
         # Store device info for reconnection / encryption
         self.device_address = device_address
         self.ble_device = ble_device
+        self.ble_device_callback = ble_device_callback
         self.encrypted = encrypted
 
         if self.encrypted:
@@ -69,6 +71,23 @@ class DeviceReader:
         # polling mutex to guard against switches
         self.polling_lock = asyncio.Lock()
 
+    def _current_ble_device(self):
+        """Return the freshest BLEDevice available.
+
+        The handle captured at setup can go stale when the Bluetooth proxy
+        that provided it drops out; ask HA's Bluetooth manager first.
+        """
+        if self.ble_device_callback is not None:
+            try:
+                device = self.ble_device_callback()
+            except Exception as err:  # best effort
+                _LOGGER.debug("ble_device_callback failed: %s", err)
+                device = None
+            if device is not None:
+                self.ble_device = device
+                return device
+        return self.ble_device
+
     async def read_data(
         self, filter_registers: List[ReadHoldingRegisters] | None = None
     ) -> dict | None:
@@ -94,7 +113,7 @@ class DeviceReader:
                     # Reconnect if not connected
                     if not self.client.is_connected:
                         # Resolve a BLEDevice object for reconnection
-                        ble_device_obj = self.ble_device
+                        ble_device_obj = self._current_ble_device()
 
                         # Try to get the device object from the client if not provided
                         if ble_device_obj is None and hasattr(self.client, "device"):
@@ -264,7 +283,11 @@ class DeviceReader:
                             # Ignore errors here
                             pass
                         self.has_notifier = False
-                    await self.client.disconnect()
+                    try:
+                        await self.client.disconnect()
+                    except Exception as err:
+                        # Proxy/adapter may already have dropped the link
+                        _LOGGER.debug("Ignoring error on disconnect: %s", err)
 
             # Check if dict is empty
             if not parsed_data:
@@ -288,7 +311,7 @@ class DeviceReader:
                 async with async_timeout.timeout(self.polling_timeout):
                     # Reconnect if not connected
                     if not self.client.is_connected:
-                        ble_device_obj = self.ble_device
+                        ble_device_obj = self._current_ble_device()
                         if ble_device_obj is None and self.device_address:
                             try:
                                 ble_device_obj = await BleakScanner.find_device_by_address(self.device_address)
@@ -350,7 +373,11 @@ class DeviceReader:
                         except Exception:
                             pass
                         self.has_notifier = False
-                    await self.client.disconnect()
+                    try:
+                        await self.client.disconnect()
+                    except Exception as err:
+                        # Proxy/adapter may already have dropped the link
+                        _LOGGER.debug("Ignoring error on disconnect: %s", err)
 
     async def _async_send_command(self, command: Union[ReadHoldingRegisters, WriteSingleRegister]) -> bytes:
         """Send command and return response"""

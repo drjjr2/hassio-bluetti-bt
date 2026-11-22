@@ -21,6 +21,7 @@ from .const import (
     CONF_USE_CONTROLS,
     CONF_ENCRYPTION,
     DATA_COORDINATOR,
+    DATA_PLATFORMS,
     DATA_POLLING_RUNNING,
     DOMAIN,
     MANUFACTURER,
@@ -63,10 +64,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     hass.data[DOMAIN][entry.entry_id].setdefault(DATA_COORDINATOR, coordinator)
 
     _LOGGER.debug("Creating entities")
-    platforms: list = PLATFORMS
+    platforms: list = list(PLATFORMS)
     if use_controls is True:
         _LOGGER.warning("You are using controls with this integration at your own risk!")
         platforms.append(Platform.SWITCH)
+
+    # Remember which platforms were set up so they can be unloaded later
+    hass.data[DOMAIN][entry.entry_id][DATA_PLATFORMS] = platforms
 
     # Setup platforms
     await hass.config_entries.async_forward_entry_setups(entry, platforms)
@@ -74,6 +78,26 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     _LOGGER.debug("Setup done")
 
     return True
+
+
+async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    """Unload a config entry (enables Reload in the UI and clean option changes)."""
+    entry_data = hass.data.get(DOMAIN, {}).get(entry.entry_id, {})
+    platforms = entry_data.get(DATA_PLATFORMS, PLATFORMS)
+
+    unload_ok = await hass.config_entries.async_unload_platforms(entry, platforms)
+    if unload_ok:
+        coordinator = entry_data.get(DATA_COORDINATOR)
+        reader = getattr(coordinator, "reader", None)
+        client = getattr(reader, "client", None)
+        if client is not None and client.is_connected:
+            try:
+                await client.disconnect()
+            except Exception as err:  # best effort, never block unload
+                _LOGGER.debug("Error disconnecting during unload: %s", err)
+        hass.data[DOMAIN].pop(entry.entry_id, None)
+
+    return unload_ok
 
 
 def device_info(entry: ConfigEntry) -> DeviceInfo:

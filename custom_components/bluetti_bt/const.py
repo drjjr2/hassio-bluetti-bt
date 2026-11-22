@@ -13,6 +13,7 @@ CONF_ENCRYPTION = "use_encryption"
 
 DATA_COORDINATOR = "coordinator"
 DATA_POLLING_RUNNING = "polling_running"
+DATA_PLATFORMS = "platforms"
 
 SUPPORTED_MODELS = [
     "AC2A",

@@ -9,6 +9,7 @@ from bleak import BleakClient
 
 from homeassistant.components import bluetooth
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import ConfigEntryError, ConfigEntryNotReady
 from homeassistant.helpers.update_coordinator import (
     DataUpdateCoordinator,
 )
@@ -49,13 +50,15 @@ class PollingCoordinator(DataUpdateCoordinator):
         self.logger.debug("Creating client")
         device = bluetooth.async_ble_device_from_address(hass, address)
         if device is None:
-            self.logger.error("Device %s not available", mac_loggable(address))
-            return None
+            # Retry setup later (HA backs off) instead of leaving self.reader undefined
+            raise ConfigEntryNotReady(f"Device {mac_loggable(address)} not available")
         client = BleakClient(device)
         bluetti_device = build_device(address, device_name)
         if bluetti_device is None:
-            self.logger.error("Failed to build device %s with name %s", mac_loggable(address), device_name)
-            return None
+            # Permanent problem: unknown device type, retrying will not help
+            raise ConfigEntryError(
+                f"Failed to build device {mac_loggable(address)} with name {device_name}"
+            )
 
         self.reader = DeviceReader(
             client,
